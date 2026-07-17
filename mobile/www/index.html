@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Loopback</title>
+    <style>
+      :root {
+        --lime: #ccda47;
+        --forest: #0a3625;
+        --cream: #f4f1e4;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: radial-gradient(rgba(10, 54, 37, 0.08) 1.4px, transparent 1.4px) 0 0/22px 22px,
+          var(--cream);
+        color: var(--forest);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+        text-align: center;
+      }
+      .card {
+        background: #fbf9f0;
+        border: 3px solid var(--forest);
+        border-radius: 26px;
+        box-shadow: 7px 7px 0 var(--forest);
+        padding: 2.5rem 1.75rem;
+        max-width: 24rem;
+      }
+      .mark {
+        width: 4.5rem;
+        height: 4.5rem;
+        border-radius: 9999px;
+        background: var(--lime);
+        border: 3px solid var(--forest);
+        margin: 0 auto 1.25rem;
+        display: grid;
+        place-items: center;
+        font-size: 2.4rem;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1.6rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      p {
+        margin: 0 0 1.5rem;
+        line-height: 1.5;
+        font-size: 0.95rem;
+        opacity: 0.8;
+      }
+      code {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        background: #e7eeb8;
+        padding: 0.1rem 0.35rem;
+        border-radius: 6px;
+        border: 2px solid var(--forest);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="mark">↻</div>
+      <h1>Loopback</h1>
+      <p>
+        This APK is a native shell. Set <code>LOOPBACK_APP_URL</code> in your
+        GitHub repo variables to your deployed backend so the app loads your live
+        notes &amp; deck. See <code>ANDROID.md</code>.
+      </p>
+    </div>
+  </body>
+</html>
