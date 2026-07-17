@@ -2,6 +2,7 @@
   "name": "nextjs-postgresql-template",
   "private": true,
   "scripts": {
+    "prebuild": "drizzle-kit push",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
