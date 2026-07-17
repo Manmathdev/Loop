@@ -68,18 +68,13 @@ jobs:
       - name: Install project dependencies
         run: npm ci
 
-      # Capacitor packages aren't yet listed in package.json, so install them
-      # here. Deliberately NOT using --no-save: cap add/sync need a consistent,
-      # fully-resolved node_modules tree, and --no-save was the root cause of
-      # the original failure. If you'd rather keep package.json untouched,
-      # add these as real devDependencies in package.json instead and drop
-      # this step entirely.
-      - name: Install Capacitor + native plugins
-        run: |
-          npm install @capacitor/cli@6 @capacitor/core@6 @capacitor/android@6 \
-            @capacitor/app@6 @capacitor/haptics@6 @capacitor/browser@6 \
-            @capacitor/network@6 @capacitor/status-bar@6 @capacitor/splash-screen@6
-          npm install --no-save @capacitor/assets@latest
+# Capacitor packages are already listed in package.json as real
+      # dependencies, so `npm ci` above already installed a consistent,
+      # fully-resolved node_modules tree for them. Only @capacitor/assets
+      # (a one-off CLI tool for icon/splash generation) isn't in
+      # package.json, so that's the only thing we install here.
+      - name: Install Capacitor asset generator
+        run: npm install --no-save @capacitor/assets@latest
 
       - name: Add Android platform (only if missing)
         run: |
