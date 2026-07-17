@@ -127,7 +127,8 @@ If all seven pass, it’s behaving exactly like a native app. 🚀
 | **Blank screen** after splash | backend not deployed, URL not HTTPS, or `/api/health` failing |
 | `net::ERR_CLEARTEXT_NOT_PERMITTED` | you used `http://` — production requires **HTTPS** |
 | Cards empty but web works | the phone hits your *deployed* DB, not your local one — confirm data is in the deployed DB |
-| APK build fails in Actions | open the failed run’s logs; ensure JDK 17 + android-34 (already set in workflow) |
+| APK build fails in Actions | open the failed run’s logs; the workflow uses the **preinstalled** SDK + JDK 17 — no extra setup needed |
+| “Node 20 is deprecated” warning | harmless now; the workflow sets `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` + `checkout@v5` so it runs on Node 24 |
 | Vibration/status bar missing | the plugins register at `cap sync` — make sure the workflow’s plugin `npm install` line is intact |
 
 ---
@@ -144,15 +145,20 @@ job to `.github/workflows/build-android.yml`, after creating keystore secrets
     needs: build-apk
     runs-on: ubuntu-latest
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true" # run JS actions on Node 24
       LOOPBACK_APP_URL: ${{ vars.LOOPBACK_APP_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: "22" }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
-      - uses: android-actions/setup-android@v3
-        with: { packages: "platforms;android-34 build-tools;34.0.0" }
+      - name: Configure preinstalled Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
       - name: Install Capacitor + plugins
         run: |
           npm install --no-save @capacitor/cli@6 @capacitor/core@6 @capacitor/android@6
