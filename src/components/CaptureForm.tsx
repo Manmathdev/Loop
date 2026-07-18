@@ -5,6 +5,100 @@ import { useRouter } from "next/navigation";
 import { App } from "@capacitor/app";
 import { getSharedUrl, clearSharedUrl } from "@/lib/share-intent";
 
+// ---------------------------------------------------------------------------
+// Device-side transcript helper — uses Capacitor's native HTTP client so the
+// request comes from the phone's residential IP (not Render's blocked IP) and
+// bypasses browser CORS entirely.
+// ---------------------------------------------------------------------------
+
+function extractYouTubeVideoId(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl);
+    if (u.hostname === "youtu.be") return u.pathname.slice(1).split("/")[0] || null;
+    if (u.searchParams.has("v")) return u.searchParams.get("v")!;
+    if (u.pathname.startsWith("/shorts/")) return u.pathname.split("/")[2] || null;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeHtmlEnt(s: string): string {
+  return s
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)));
+}
+
+function parseTranscriptXml(xml: string): string {
+  let text = "";
+  // srv3 format: <p t="ms" d="ms"><s>word</s>...</p>
+  const pRe = /<p\s+t="\d+"\s+d="\d+"[^>]*>([\s\S]*?)<\/p>/g;
+  let m: RegExpExecArray | null;
+  while ((m = pRe.exec(xml)) !== null) {
+    const inner = m[1];
+    let seg = "";
+    const sRe = /<s[^>]*>([^<]*)<\/s>/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = sRe.exec(inner)) !== null) seg += sm[1];
+    if (!seg) seg = inner.replace(/<[^>]+>/g, "");
+    text += seg + " ";
+  }
+  if (text.trim()) return decodeHtmlEnt(text.trim());
+  // old format: <text start="s" dur="s">caption</text>
+  const cRe = /<text[^>]*>([^<]*)<\/text>/g;
+  while ((m = cRe.exec(xml)) !== null) text += m[1] + " ";
+  return decodeHtmlEnt(text.trim());
+}
+
+async function fetchTranscriptOnDevice(videoId: string): Promise<string | null> {
+  try {
+    const { Capacitor, CapacitorHttp } = await import("@capacitor/core");
+    if (!Capacitor.isNativePlatform()) return null; // web — can't bypass CORS
+
+    // 1. Get caption tracks via InnerTube from the phone's IP
+    const playerResp = await CapacitorHttp.post({
+      url: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "com.google.android.youtube/20.10.38 (Linux; U; Android 14)",
+      },
+      data: {
+        context: {
+          client: { clientName: "ANDROID", clientVersion: "20.10.38", androidSdkVersion: 34 },
+          user: { lockedSafetyMode: false },
+          request: { useSsl: true, internalExperimentFlags: [], consistencyTokenJars: [] },
+        },
+        videoId,
+      },
+    });
+
+    const tracks =
+      playerResp.data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    if (!Array.isArray(tracks) || tracks.length === 0) return null;
+
+    // 2. Download transcript — prefer English
+    const track = tracks.find((t: any) => t.languageCode === "en") || tracks[0];
+    const xmlResp = await CapacitorHttp.get({
+      url: track.baseUrl,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+
+    return parseTranscriptXml(xmlResp.data);
+  } catch (err) {
+    console.error("[CaptureForm] device fetch failed:", err);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export function CaptureForm() {
   const router = useRouter();
   const [url, setUrl] = useState("");
@@ -15,51 +109,54 @@ export function CaptureForm() {
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const submittedRef = useRef(false);
 
-  useEffect(() => {
-    let cleanup: { remove: () => void } | null = null;
-
-    async function check() {
-      submittedRef.current = false;
-      const u = await getSharedUrl();
-      if (u) {
-        console.log("[CaptureForm] shared URL from intent:", u);
-        setUrl(u);
-        await clearSharedUrl();
-        submitUrl(u);
-      }
+  /** POST to /api/reels — core submit, wrapped by the entry points below. */
+  async function postAndRedirect(
+    targetUrl: string,
+    targetContent: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    try {
+      const res = await fetch("/api/reels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: targetUrl, content: targetContent }),
+      });
+      const data = await res.json();
+      if (!res.ok) return { ok: false, error: data?.error || "Something went wrong." };
+      router.push(`/reel/${data.id}`);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : "Something went wrong." };
     }
+  }
 
-    check();
-    App.addListener("resume", check).then((h) => {
-      cleanup = h;
-    });
-
-    return () => {
-      cleanup?.remove();
-    };
-  }, []);
-
+  /** Shared intent / "paste link" auto-submit. */
   async function submitUrl(targetUrl: string) {
     if (submittedRef.current) return;
     submittedRef.current = true;
     setError(null);
     setTranscriptLoading(true);
-    try {
-      const res = await fetch("/api/reels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: targetUrl, content: "" }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Something went wrong.");
-      router.push(`/reel/${data.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-      setTranscriptLoading(false);
-      submittedRef.current = false;
+
+    const result = await postAndRedirect(targetUrl, "");
+    if (result.ok) return;
+
+    // Server couldn't fetch the transcript — try from the phone (APK).
+    if (result.error.includes("No captions available")) {
+      const videoId = extractYouTubeVideoId(targetUrl);
+      if (videoId) {
+        const transcript = await fetchTranscriptOnDevice(videoId);
+        if (transcript) {
+          const retry = await postAndRedirect(targetUrl, transcript);
+          if (retry.ok) return;
+        }
+      }
     }
+
+    setError(result.error);
+    setTranscriptLoading(false);
+    submittedRef.current = false;
   }
 
+  /** Manual form submission (button click or Enter). */
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!url.trim()) {
@@ -69,19 +166,27 @@ export function CaptureForm() {
     console.log("[CaptureForm] manual submit URL:", url);
     setError(null);
     setLoading(true);
-    try {
-      const res = await fetch("/api/reels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, content }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Something went wrong.");
-      router.push(`/reel/${data.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-      setLoading(false);
+
+    const initialContent = content;
+    const result = await postAndRedirect(url, initialContent);
+    if (result.ok) return;
+
+    // Only try device-side fallback if the user didn't already paste content.
+    if (!initialContent && result.error.includes("No captions available")) {
+      const videoId = extractYouTubeVideoId(url);
+      if (videoId) {
+        setTranscriptLoading(true);
+        const transcript = await fetchTranscriptOnDevice(videoId);
+        if (transcript) {
+          const retry = await postAndRedirect(url, transcript);
+          if (retry.ok) return;
+        }
+      }
     }
+
+    setError(result.error);
+    setLoading(false);
+    setTranscriptLoading(false);
   }
 
   return (
