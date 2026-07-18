@@ -85,36 +85,35 @@ jobs:
           fi
 
       - name: Generate native icons & splash
-        run: npx @capacitor/assets generate --android || true
+        run: npx @capacitor/assets generate --android --assetPath resources || true
 
       - name: Add share intent plugin
-        shell: bash
         run: |
           PKG="android/app/src/main/java/com/loopback/app"
           mkdir -p "$PKG/plugins"
           cp mobile/plugins/share-intent/ShareIntentPlugin.java "$PKG/plugins/"
           cp mobile/plugins/share-intent/MainActivity.java "$PKG/"
 
-          python3 <<'PYEOF'
+          python3 -c "
 import re
-mf = "android/app/src/main/AndroidManifest.xml"
+mf = 'android/app/src/main/AndroidManifest.xml'
 with open(mf) as f:
     xml = f.read()
 share = '''          <intent-filter>
-            <action android:name="android.intent.action.SEND" />
-            <category android:name="android.intent.category.DEFAULT" />
-            <data android:mimeType="text/plain" />
+            <action android:name=\"android.intent.action.SEND\" />
+            <category android:name=\"android.intent.category.DEFAULT\" />
+            <data android:mimeType=\"text/plain\" />
           </intent-filter>
 '''
 xml = re.sub(
-    r'(<action android:name="android.intent.action.MAIN"/>.*?</intent-filter>)',
+    r'(<action android:name=\"android.intent.action.MAIN\" ?/>.*?</intent-filter>)',
     r'\1\n' + share,
     xml,
     flags=re.DOTALL,
 )
-with open(mf, "w") as f:
+with open(mf, 'w') as f:
     f.write(xml)
-PYEOF
+"
 
       - name: Sync web assets + plugins into native project
         run: npx cap sync android
