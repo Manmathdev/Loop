@@ -1,7 +1,5 @@
 import type { MetadataRoute } from "next";
 
-// PWA manifest — makes Loopback installable on Android/home screen and is the
-// basis for wrapping it into a native APK (see ANDROID.md).
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Loopback — turn the scroll into knowledge you keep",
@@ -20,5 +18,13 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icon.png", sizes: "512x512", type: "image/png", purpose: "any" },
       { src: "/icon.png", sizes: "1024x1024", type: "image/png", purpose: "maskable" },
     ],
+    share_target: {
+      action: "/share-handler",
+      method: "GET",
+      params: {
+        text: "text",
+        url: "url",
+      },
+    },
   };
 }

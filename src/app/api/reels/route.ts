@@ -4,6 +4,7 @@ import { reels, notes, flashcards } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { parseUrl, fetchOEmbed } from "@/lib/platform";
 import { generateReelContent } from "@/lib/ai";
+import { getTranscriptFromUrl } from "@/lib/transcript";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
   }
 
   const url = (body.url ?? "").trim();
-  const content = (body.content ?? "").trim();
+  const manualContent = (body.content ?? "").trim();
   if (!url) {
     return NextResponse.json({ error: "A URL is required." }, { status: 400 });
   }
@@ -44,10 +45,31 @@ export async function POST(req: Request) {
     );
   }
 
-  // Enrich with public oEmbed metadata (title / thumbnail / author).
   const oembed = await fetchOEmbed(parsed.normalized, parsed.platform, parsed.videoId);
 
-  // Insert the reel in a "processing" state, then run the AI.
+  let transcript: string | null = null;
+  if (!manualContent) {
+    transcript = await getTranscriptFromUrl(
+      parsed.normalized,
+      parsed.platform,
+      parsed.videoId,
+    );
+  }
+
+  const rawContent = manualContent || transcript || "";
+
+  if (!rawContent) {
+    return NextResponse.json(
+      {
+        error:
+          parsed.platform === "youtube"
+            ? "No captions available for this video. You can paste the transcript manually using the option below."
+            : "Please paste the transcript or notes for this video.",
+      },
+      { status: 400 },
+    );
+  }
+
   const [created] = await db
     .insert(reels)
     .values({
@@ -58,7 +80,7 @@ export async function POST(req: Request) {
       thumbnailUrl: oembed.thumbnailUrl,
       title: oembed.title,
       status: "processing",
-      rawContent: content.slice(0, 8000),
+      rawContent: rawContent.slice(0, 8000),
     })
     .returning({ id: reels.id });
 
@@ -71,7 +93,7 @@ export async function POST(req: Request) {
   try {
     const out = await generateReelContent({
       url: parsed.normalized,
-      content,
+      content: rawContent,
       platform: parsed.platform,
       fetchedTitle: oembed.title,
     });
@@ -106,7 +128,6 @@ export async function POST(req: Request) {
       .update(reels)
       .set({ status: "failed", errorMessage: message, updatedAt: new Date() })
       .where(eq(reels.id, created.id));
-    // Return the id so the user lands on the reel page and can retry.
     return NextResponse.json(
       { id: created.id, status: "failed", error: message },
       { status: 200 },

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { reels, flashcards } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { generateReelContent } from "@/lib/ai";
+import { getTranscriptFromUrl } from "@/lib/transcript";
 
 export const dynamic = "force-dynamic";
 
@@ -21,15 +22,31 @@ export async function POST(
     return NextResponse.json({ error: "Reel not found." }, { status: 404 });
   }
 
+  let rawContent = reel.rawContent ?? "";
+
+  if (!rawContent) {
+    const transcript = await getTranscriptFromUrl(
+      reel.url,
+      reel.platform,
+      reel.videoId,
+    );
+    if (transcript) rawContent = transcript;
+  }
+
   await db
     .update(reels)
-    .set({ status: "processing", errorMessage: null, updatedAt: new Date() })
+    .set({
+      status: "processing",
+      errorMessage: null,
+      rawContent: rawContent.slice(0, 8000),
+      updatedAt: new Date(),
+    })
     .where(eq(reels.id, num));
 
   try {
     const out = await generateReelContent({
       url: reel.url,
-      content: reel.rawContent ?? "",
+      content: rawContent,
       platform: reel.platform,
       fetchedTitle: reel.title,
     });
@@ -47,7 +64,6 @@ export async function POST(
       })
       .where(eq(reels.id, num));
 
-    // Replace existing cards with fresh ones.
     await db.delete(flashcards).where(eq(flashcards.reelId, num));
     if (out.flashcards.length > 0) {
       await db.insert(flashcards).values(

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { CaptureForm } from "@/components/CaptureForm";
 import { ReelCard } from "@/components/ReelCard";
 import { LoadExamples } from "@/components/LoadExamples";
@@ -42,7 +43,9 @@ export default async function Home() {
             </span>
             <h2 className="display text-xl text-forest">capture a reel</h2>
           </div>
-          <CaptureForm />
+          <Suspense fallback={<div className="text-sm text-forest-mist">Loading…</div>}>
+            <CaptureForm />
+          </Suspense>
         </div>
       </section>
 
