@@ -1,6 +1,7 @@
 import "server-only";
+import https from "https";
 
-const BASE = (process.env.OPENCODE_ZEN_BASE_URL || "https://opencode.ai/zen/v1").replace(/\/+$/, "");
+const ENDPOINT = "https://opencode.ai/zen/v1/chat/completions";
 const MODEL = process.env.OPENCODE_ZEN_MODEL || "deepseek-v4-flash-free";
 
 export interface AiReelOutput {
@@ -26,21 +27,46 @@ Rules:
 - Stay faithful to the provided content. If a fact is uncertain, keep the answer hedged.
 - If the content is nearly empty, do your best to infer a useful angle from the title/URL; if truly impossible, return a single explanatory flashcard.`;
 
-async function aiFetch(
-  endpoint: string,
-  body: object,
+function httpsPost(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
   signal: AbortSignal,
 ): Promise<Response> {
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENCODE_ZEN_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-    signal,
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const opts: https.RequestOptions = {
+      hostname: u.hostname,
+      port: Number(u.port) || 443,
+      path: u.pathname + u.search,
+      method: "POST",
+      headers,
+    };
+
+    const req = https.request(opts, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("end", () => {
+        const buf = Buffer.concat(chunks);
+        resolve({
+          ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300,
+          status: res.statusCode ?? 0,
+          text: () => Promise.resolve(buf.toString()),
+          json: () => Promise.resolve(JSON.parse(buf.toString())),
+        } as Response);
+      });
+    });
+
+    req.on("error", reject);
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        req.destroy();
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    }
+    req.write(body);
+    req.end();
   });
-  return res;
 }
 
 export async function generateReelContent(input: {
@@ -64,8 +90,7 @@ export async function generateReelContent(input: {
     .filter(Boolean)
     .join("\n");
 
-  const endpoint = `${BASE}/chat/completions`;
-  const body = {
+  const body = JSON.stringify({
     model: MODEL,
     temperature: 0.4,
     max_tokens: 2600,
@@ -73,6 +98,11 @@ export async function generateReelContent(input: {
       { role: "system", content: SYSTEM },
       { role: "user", content: user },
     ],
+  });
+
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
   };
 
   let lastErr: Error | null = null;
@@ -85,13 +115,13 @@ export async function generateReelContent(input: {
     const timer = setTimeout(() => ac.abort(), 45000);
 
     try {
-      const res = await aiFetch(endpoint, body, ac.signal);
+      const res = await httpsPost(ENDPOINT, headers, body, ac.signal);
       clearTimeout(timer);
 
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
         if (res.status === 429) {
-          lastErr = new Error(`AI rate limited (429). Retrying…`);
+          lastErr = new Error("AI rate limited (429). Retrying\u2026");
           continue;
         }
         throw new Error(`AI request failed (${res.status}): ${txt.slice(0, 200)}`);
