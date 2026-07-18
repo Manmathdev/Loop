@@ -33,11 +33,23 @@ export async function POST(req: Request) {
 
   const url = (body.url ?? "").trim();
   const manualContent = (body.content ?? "").trim();
+
+  console.log("[api/reels] POST received");
+  console.log("[api/reels] raw url from client:", JSON.stringify(url));
+  console.log("[api/reels] manualContent present:", !!manualContent);
+
   if (!url) {
     return NextResponse.json({ error: "A URL is required." }, { status: 400 });
   }
 
   const parsed = parseUrl(url);
+  console.log("[api/reels] parseUrl result:", JSON.stringify(parsed, null, 2));
+  if (parsed && parsed.platform === "youtube") {
+    console.log("[api/reels] videoId:", parsed.videoId);
+    console.log("[api/reels] videoId length:", parsed.videoId?.length);
+    console.log("[api/reels] videoId valid 11-char ID:", parsed.videoId?.length === 11);
+  }
+
   if (!parsed) {
     return NextResponse.json(
       { error: "That doesn't look like a valid URL." },

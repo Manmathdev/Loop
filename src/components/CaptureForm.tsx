@@ -22,6 +22,7 @@ export function CaptureForm() {
       submittedRef.current = false;
       const u = await getSharedUrl();
       if (u) {
+        console.log("[CaptureForm] shared URL from intent:", u);
         setUrl(u);
         await clearSharedUrl();
         submitUrl(u);
@@ -65,6 +66,7 @@ export function CaptureForm() {
       setError("Paste a reel or video link to get started.");
       return;
     }
+    console.log("[CaptureForm] manual submit URL:", url);
     setError(null);
     setLoading(true);
     try {
