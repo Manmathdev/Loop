@@ -1,6 +1,6 @@
 import "server-only";
 
-const BASE = process.env.OPENCODE_ZEN_BASE_URL || "https://opencode.ai/zen/v1";
+const BASE = (process.env.OPENCODE_ZEN_BASE_URL || "https://opencode.ai/zen/v1").replace(/\/+$/, "");
 const MODEL = process.env.OPENCODE_ZEN_MODEL || "deepseek-v4-flash-free";
 
 export interface AiReelOutput {
@@ -47,7 +47,9 @@ export async function generateReelContent(input: {
     .filter(Boolean)
     .join("\n");
 
-  const res = await fetch(`${BASE}/chat/completions`, {
+  const endpoint = `${BASE}/chat/completions`;
+
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -62,6 +64,8 @@ export async function generateReelContent(input: {
         { role: "user", content: user },
       ],
     }),
+  }).catch((err) => {
+    throw new Error(`AI fetch failed: ${err.message}. Endpoint: ${endpoint}`);
   });
 
   if (!res.ok) {
