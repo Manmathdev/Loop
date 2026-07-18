@@ -26,6 +26,23 @@ Rules:
 - Stay faithful to the provided content. If a fact is uncertain, keep the answer hedged.
 - If the content is nearly empty, do your best to infer a useful angle from the title/URL; if truly impossible, return a single explanatory flashcard.`;
 
+async function aiFetch(
+  endpoint: string,
+  body: object,
+  signal: AbortSignal,
+): Promise<Response> {
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENCODE_ZEN_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return res;
+}
+
 export async function generateReelContent(input: {
   url: string;
   content: string;
@@ -48,38 +65,56 @@ export async function generateReelContent(input: {
     .join("\n");
 
   const endpoint = `${BASE}/chat/completions`;
+  const body = {
+    model: MODEL,
+    temperature: 0.4,
+    max_tokens: 2600,
+    messages: [
+      { role: "system", content: SYSTEM },
+      { role: "user", content: user },
+    ],
+  };
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.4,
-      max_tokens: 2600,
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: user },
-      ],
-    }),
-  }).catch((err) => {
-    throw new Error(`AI fetch failed: ${err.message}. Endpoint: ${endpoint}`);
-  });
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      const delay = Math.min(1000 * 2 ** attempt, 8000);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 45000);
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`AI request failed (${res.status}): ${txt.slice(0, 200)}`);
+    try {
+      const res = await aiFetch(endpoint, body, ac.signal);
+      clearTimeout(timer);
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        if (res.status === 429) {
+          lastErr = new Error(`AI rate limited (429). Retrying…`);
+          continue;
+        }
+        throw new Error(`AI request failed (${res.status}): ${txt.slice(0, 200)}`);
+      }
+
+      const data = await res.json();
+      const raw: string =
+        data?.choices?.[0]?.message?.content ??
+        data?.choices?.[0]?.message?.reasoning ??
+        "";
+      if (!raw) throw new Error("AI returned an empty response.");
+      return parseAiOutput(raw);
+    } catch (err) {
+      clearTimeout(timer);
+      if (err instanceof Error && err.name === "AbortError") {
+        lastErr = new Error("AI request timed out after 45s.");
+      } else {
+        lastErr = err instanceof Error ? err : new Error("Unknown AI error.");
+      }
+    }
   }
 
-  const data = await res.json();
-  const raw: string =
-    data?.choices?.[0]?.message?.content ??
-    data?.choices?.[0]?.message?.reasoning ??
-    "";
-  if (!raw) throw new Error("AI returned an empty response.");
-  return parseAiOutput(raw);
+  throw lastErr ?? new Error("AI processing failed after 3 attempts.");
 }
 
 function parseAiOutput(raw: string): AiReelOutput {
