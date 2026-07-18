@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { App } from "@capacitor/app";
 import { getSharedUrl, clearSharedUrl } from "@/lib/share-intent";
 
 export function CaptureForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [url, setUrl] = useState("");
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
@@ -16,19 +16,26 @@ export function CaptureForm() {
   const submittedRef = useRef(false);
 
   useEffect(() => {
-    const shared = searchParams.get("shared");
-    if (shared) {
-      setUrl(shared);
-      submitUrl(shared);
-      return;
-    }
-    getSharedUrl().then((u) => {
+    let cleanup: { remove: () => void } | null = null;
+
+    async function check() {
+      submittedRef.current = false;
+      const u = await getSharedUrl();
       if (u) {
         setUrl(u);
-        clearSharedUrl();
+        await clearSharedUrl();
         submitUrl(u);
       }
+    }
+
+    check();
+    App.addListener("resume", check).then((h) => {
+      cleanup = h;
     });
+
+    return () => {
+      cleanup?.remove();
+    };
   }, []);
 
   async function submitUrl(targetUrl: string) {

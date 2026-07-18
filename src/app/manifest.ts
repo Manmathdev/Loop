@@ -18,13 +18,5 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icon.png", sizes: "512x512", type: "image/png", purpose: "any" },
       { src: "/icon.png", sizes: "1024x1024", type: "image/png", purpose: "maskable" },
     ],
-    share_target: {
-      action: "/share-handler",
-      method: "GET",
-      params: {
-        text: "text",
-        url: "url",
-      },
-    },
   };
 }
