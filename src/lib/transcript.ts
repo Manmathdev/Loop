@@ -6,7 +6,7 @@ function httpsRequest(
   method: string,
   headers: Record<string, string>,
   body?: string,
-  timeoutMs = 10000,
+  timeoutMs = 15000,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -23,10 +23,7 @@ function httpsRequest(
       res.on("end", () => resolve(Buffer.concat(chunks).toString()));
     });
     req.on("error", reject);
-    req.setTimeout(timeoutMs, () => {
-      req.destroy();
-      reject(new Error("timeout"));
-    });
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error("timeout")); });
     if (body) req.write(body);
     req.end();
   });
@@ -63,22 +60,48 @@ function extractText(xml: string): string[] {
   return results;
 }
 
-function extractJson(html: string, name: string): any {
-  const token = `${name} = `;
-  const start = html.indexOf(token);
-  if (start === -1) return null;
-  const jsonStart = start + token.length;
-  let depth = 0;
-  for (let i = jsonStart; i < html.length; i++) {
-    if (html[i] === "{") depth++;
-    else if (html[i] === "}") {
-      depth--;
-      if (depth === 0) {
-        try { return JSON.parse(html.slice(jsonStart, i + 1)); } catch { return null; }
-      }
-    }
+interface CaptionTrack {
+  baseUrl: string;
+  languageCode: string;
+}
+
+async function fetchInnerTubeTracks(
+  videoId: string,
+  clientName: string,
+  clientVersion: string,
+  userAgent: string,
+): Promise<CaptionTrack[] | null> {
+  try {
+    const resp = await httpsRequest(
+      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+      "POST",
+      { "Content-Type": "application/json", "User-Agent": userAgent },
+      JSON.stringify({ context: { client: { clientName, clientVersion } }, videoId }),
+      15000,
+    );
+    const data = JSON.parse(resp);
+    const status = data?.playabilityStatus?.status;
+    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    console.log(`[transcript] InnerTube ${clientName}/${clientVersion}: status=${status}, tracks=${tracks?.length ?? 0}`);
+    if (Array.isArray(tracks) && tracks.length > 0) return tracks;
+    return null;
+  } catch (err) {
+    console.log(`[transcript] InnerTube ${clientName}/${clientVersion} error:`, err instanceof Error ? err.message : String(err));
+    return null;
   }
-  return null;
+}
+
+async function downloadTranscript(trackUrl: string): Promise<string | null> {
+  try {
+    const xml = await httpsRequest(trackUrl, "GET", {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    }, undefined, 15000);
+    const segments = extractText(xml);
+    if (segments.length === 0) return null;
+    return segments.join(" ");
+  } catch {
+    return null;
+  }
 }
 
 export async function getTranscriptFromUrl(
@@ -93,80 +116,26 @@ export async function getTranscriptFromUrl(
 
   console.log("[transcript] fetching videoId:", videoId);
 
-  // Method 1: InnerTube API (Android client)
-  try {
-    const resp = await httpsRequest(
-      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-      "POST",
-      {
-        "Content-Type": "application/json",
-        "User-Agent": "com.google.android.youtube/20.10.38 (Linux; U; Android 14)",
-      },
-      JSON.stringify({
-        context: { client: { clientName: "ANDROID", clientVersion: "20.10.38" } },
-        videoId,
-      }),
-      10000,
-    );
-    const data = JSON.parse(resp);
-    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    if (Array.isArray(tracks) && tracks.length > 0) {
-      const trackUrl = tracks[0].baseUrl;
-      if (typeof trackUrl === "string" && trackUrl.includes("youtube.com")) {
-        const xml = await httpsRequest(trackUrl, "GET", {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-        }, undefined, 10000);
-        const segments = extractText(xml);
-        if (segments.length > 0) {
-          const text = segments.join(" ");
-          console.log("[transcript] OK (InnerTube) —", segments.length, "segs,", text.length, "chars");
-          return text;
-        }
+  // Try InnerTube with multiple client configurations
+  const clients = [
+    { name: "ANDROID", ver: "20.10.38", ua: "com.google.android.youtube/20.10.38 (Linux; U; Android 14)" },
+    { name: "ANDROID", ver: "19.45.36", ua: "com.google.android.youtube/19.45.36 (Linux; U; Android 14)" },
+    { name: "IOS", ver: "20.10.38", ua: "com.google.android.youtube/20.10.38 (iPhone; U; iOS 18.0)" },
+    { name: "WEB", ver: "2.20240627.00.00", ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36" },
+  ];
+
+  for (const client of clients) {
+    const tracks = await fetchInnerTubeTracks(videoId, client.name, client.ver, client.ua);
+    if (tracks && tracks.length > 0) {
+      const text = await downloadTranscript(tracks[0].baseUrl);
+      if (text) {
+        const count = text.split(" ").length;
+        console.log(`[transcript] OK (${client.name}) — ${count} words for ${videoId}`);
+        return text;
       }
     }
-  } catch (err) {
-    console.log("[transcript] InnerTube failed:", err instanceof Error ? err.message : String(err));
   }
 
-  // Method 2: Page scrape
-  try {
-    const html = await httpsRequest(
-      `https://www.youtube.com/watch?v=${videoId}`,
-      "GET",
-      { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36" },
-      undefined,
-      10000,
-    );
-    if (html.includes('class="g-recaptcha"') || !html.includes('"playabilityStatus"')) {
-      console.log("[transcript] page blocked or unavailable for", videoId);
-      return null;
-    }
-    const pr = extractJson(html, "ytInitialPlayerResponse");
-    const tracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    if (!Array.isArray(tracks) || tracks.length === 0) {
-      console.log("[transcript] no caption tracks on page for", videoId);
-      return null;
-    }
-    const trackUrl = tracks[0].baseUrl;
-    if (typeof trackUrl !== "string" || !trackUrl.includes("youtube.com")) {
-      console.log("[transcript] invalid track URL for", videoId);
-      return null;
-    }
-    const xml = await httpsRequest(trackUrl, "GET", {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    }, undefined, 10000);
-    const segments = extractText(xml);
-    if (segments.length === 0) {
-      console.log("[transcript] no segments parsed for", videoId);
-      return null;
-    }
-    const text = segments.join(" ");
-    console.log("[transcript] OK (scrape) —", segments.length, "segs,", text.length, "chars");
-    return text;
-  } catch (err) {
-    console.log("[transcript] scrape failed:", err instanceof Error ? err.message : String(err));
-  }
-
-  console.log("[transcript] exhausted all methods for", videoId);
+  console.log("[transcript] all InnerTube clients failed for", videoId);
   return null;
 }
