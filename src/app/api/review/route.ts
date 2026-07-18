@@ -6,6 +6,7 @@ import { applyRating } from "@/lib/srs";
 import type { Rating } from "@/lib/types";
 import { getDueQueue } from "@/lib/queries";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {

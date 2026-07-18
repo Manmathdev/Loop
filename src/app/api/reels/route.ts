@@ -6,6 +6,7 @@ import { parseUrl, fetchOEmbed } from "@/lib/platform";
 import { generateReelContent } from "@/lib/ai";
 import { getTranscriptFromUrl } from "@/lib/transcript";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
