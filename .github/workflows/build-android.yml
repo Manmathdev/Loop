@@ -68,7 +68,7 @@ jobs:
       - name: Install project dependencies
         run: npm ci
 
-# Capacitor packages are already listed in package.json as real
+      # Capacitor packages are already listed in package.json as real
       # dependencies, so `npm ci` above already installed a consistent,
       # fully-resolved node_modules tree for them. Only @capacitor/assets
       # (a one-off CLI tool for icon/splash generation) isn't in
@@ -93,27 +93,7 @@ jobs:
           mkdir -p "$PKG/plugins"
           cp mobile/plugins/share-intent/ShareIntentPlugin.java "$PKG/plugins/"
           cp mobile/plugins/share-intent/MainActivity.java "$PKG/"
-
-          python3 -c "
-import re
-mf = 'android/app/src/main/AndroidManifest.xml'
-with open(mf) as f:
-    xml = f.read()
-share = '''          <intent-filter>
-            <action android:name=\"android.intent.action.SEND\" />
-            <category android:name=\"android.intent.category.DEFAULT\" />
-            <data android:mimeType=\"text/plain\" />
-          </intent-filter>
-'''
-xml = re.sub(
-    r'(<action android:name=\"android.intent.action.MAIN\" ?/>.*?</intent-filter>)',
-    r'\1\n' + share,
-    xml,
-    flags=re.DOTALL,
-)
-with open(mf, 'w') as f:
-    f.write(xml)
-"
+          python3 mobile/plugins/share-intent/patch-manifest.py
 
       - name: Sync web assets + plugins into native project
         run: npx cap sync android
