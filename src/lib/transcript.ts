@@ -73,7 +73,7 @@ async function fetchInnerTubeTracks(
 ): Promise<CaptionTrack[] | null> {
   try {
     const resp = await httpsRequest(
-      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+      "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8&prettyPrint=false",
       "POST",
       { "Content-Type": "application/json", "User-Agent": userAgent },
       JSON.stringify({ context: { client: { clientName, clientVersion } }, videoId }),
