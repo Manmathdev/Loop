@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { getSharedUrl, clearSharedUrl } from "@/lib/share-intent";
 
 export function CaptureForm() {
   const router = useRouter();
@@ -10,6 +11,42 @@ export function CaptureForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTips, setShowTips] = useState(false);
+  const [sharedUrl, setSharedUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    getSharedUrl().then((u) => {
+      if (u) {
+        setUrl(u);
+        setSharedUrl(u);
+        clearSharedUrl();
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (sharedUrl && !loading) {
+      submitAuto();
+    }
+  }, [sharedUrl]);
+
+  async function submitAuto() {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/reels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: sharedUrl, content: "" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Something went wrong.");
+      setSharedUrl(null);
+      router.push(`/reel/${data.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setLoading(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +73,13 @@ export function CaptureForm() {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
+      {sharedUrl && loading && (
+        <div className="clay-sm border-l-4 border-l-lime bg-lime-soft p-3 text-sm">
+          <p className="font-semibold text-forest">Processing shared video…</p>
+          <p className="mt-1 text-xs text-forest-soft">{sharedUrl}</p>
+        </div>
+      )}
+
       <div className="flex flex-col gap-2">
         <label htmlFor="url" className="mono text-xs font-semibold text-forest-mist">
           01 · the reel link
@@ -109,7 +153,7 @@ export function CaptureForm() {
             <Spinner /> distilling into notes…
           </>
         ) : (
-          <>save &amp; turn into notes →</>
+          <>save & turn into notes →</>
         )}
       </button>
     </form>
